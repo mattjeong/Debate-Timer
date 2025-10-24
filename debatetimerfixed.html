@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>AP Debate Timer — HTML</title>
+<style>
+  button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  :root{
+    --bg-green:#d1fae5; --fg-green:#064e3b; --bd-green:#34d399;
+    --bg-yellow:#fef3c7; --fg-yellow:#92400e; --bd-yellow:#f59e0b;
+    --bg-red:#fecaca; --fg-red:#7f1d1d; --bd-red:#f87171;
+    --bg-card:#ffffff; --bd:#e5e7eb; --fg:#111827; --muted:#6b7280;
+    --track:#e5e7eb; --fill:#111827;
+  }
+  html,body{height:100%}
+  body{margin:0;font:16px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";}
+  .wrap{min-height:100%;display:flex;flex-direction:column;align-items:center;gap:24px;padding:24px;transition:background-color .25s,color .25s}
+  .container{width:100%;max-width:1000px;display:flex;flex-direction:column;gap:16px}
+  header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  h1{font-size:24px;margin:0}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .btn{appearance:none;border:1px solid var(--bd);background:#fff;border-radius:12px;padding:10px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-weight:600}
+  .btn:active{transform:translateY(1px)}
+  .card{background:var(--bg-card);border:1px solid var(--bd);border-radius:16px;padding:16px}
+  .title{font-weight:700}
+  .muted{color:var(--muted)}
+  .clock{font-size:76px;font-weight:900;text-align:center}
+  .progress{height:12px;background:var(--track);border-radius:999px;position:relative;overflow:hidden}
+  .fill{position:absolute;left:0;top:0;bottom:0;background:var(--fill)}
+  .seg{outline:1px solid rgba(0,0,0,0.12);height:100%}
+  .grid{display:grid;gap:12px}
+  .grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .input{padding:8px 10px;border:1px solid var(--bd);border-radius:10px;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
+  .label{display:flex;flex-direction:column;gap:6px}
+  .bar{height:8px;background:rgba(17,24,39,.12);border-radius:8px;overflow:hidden}
+  .bar>.bfill{height:100%;background:#111827}
+  .caps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:6px;color:#475569;font-size:12px}
+  .tests li{margin:2px 0}
+  .note{font-size:12px;color:#6b7280;margin-top:6px;text-align:center}
+
+  /* Speaker Progress Bar Styles */
+  .speaker-progress-bar {
+    display: grid;
+    grid-template-columns: repeat(14, 1fr); /* 14 slots for speakers + preps */
+    gap: 4px;
+    border-radius: 8px;
+    background-color: var(--track);
+    padding: 4px;
+  }
+  .speaker-box {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 8px 4px;
+    border-radius: 6px;
+    text-align: center;
+    background-color: #fff;
+    border: 1px solid var(--bd);
+    cursor: grab;
+    user-select: none;
+    transition: background-color 0.2s, box-shadow 0.2s, opacity 0.2s;
+  }
+  .speaker-box:active { cursor: grabbing; }
+  .speaker-box.team-prop { color: #15803d; border-color: #86efac; }
+  .speaker-box.team-opp { color: #b91c1c; border-color: #fca5a5; }
+  .speaker-box.team-none { color: #374151; border-color: #d1d5db; }
+  .speaker-box.active-speaker {
+    box-shadow: 0 0 0 3px var(--fg, #111827);
+    font-weight: 900;
+  }
+  .speaker-box.dragging {
+    opacity: 0.5;
+    background: #e0f2fe;
+  }
+  .speaker-box.drag-over {
+    background: #fef9c3;
+    border-style: dashed;
+  }
+  .speaker-box.inactive {
+    opacity: 0.4;
+    background: #f3f4f6;
+    text-decoration: line-through;
+    cursor: not-allowed;
+  }
+
+  @media (max-width:800px){.grid-3{grid-template-columns:1fr}}
+
+  /* ===== iPhone Layout Fix ===== */
+@supports (-webkit-touch-callout: none) {
+  .speaker-progress-bar {
+    grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
+    row-gap: 6px;
+  }
+  .speaker-box {
+    font-size: clamp(9px, 2.5vw, 12px);
+    padding: 6px 2px;
+    word-wrap: break-word;
+    text-align: center;
+  }
+}
+</style>
+</head>
+<body>
+<script>
+window.addEventListener("touchend", () => {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (AC) {
+    try {
+      const ctx = new AC();
+      if (ctx.state === "suspended") ctx.resume();
+    } catch (e) {}
+  }
+}, { once: true });
+</script>
+
+  <div id="app" class="wrap">
+    <div class="container">
+      <header>
+        <h1>Debate Timer</h1>
+        <div class="row">
+          <button id="muteBtn" class="btn">Sound</button>
+          <button id="enableBtn" class="btn">Enable Sound</button>
+          <button id="testsBtn" class="btn">Tests</button>
+        </div>
+      </header>
+
+      <!-- Speaker Progress -->
+      <div class="card">
+        <div class="title" style="margin-bottom:8px">Speaker Progress</div>
+        <div class="speaker-progress-bar" id="speakerProgress">
+          <!-- Speakers will be generated by JS -->
+        </div>
+        <div class="row" style="justify-content:space-between;margin-top:8px">
+          <div>
+            <button id="prevSpeakerBtn" class="btn">Previous</button>
+            <button id="nextSpeakerBtn" class="btn">Next</button>
+          </div>
+          <!-- Prep timer is part of this card -->
+          <div id="prepTimerContainer" class="row">
+            <input id="prepInput" class="input" value="20:00" style="width:60px" />
+            <div class="clock" id="prepClock" style="font-size:20px;font-weight:700;padding:0 8px">20:00</div>
+            <button id="prepStart" class="btn">Start</button>
+            <button id="prepReset" class="btn">Reset</button>
+          </div>
+          <button id="resetOrderBtn" class="btn">Reset Order</button>
+        </div>
+        <div class="bar" style="margin-top:8px"><div class="bfill" id="prepFill" style="width:0%"></div></div>
+        <div class="note">Click to select, Double-click to toggle, Drag to reorder.</div>
+      </div>
+
+      <div class="row" id="presets"></div>
+
+      <!-- Main Timer Card -->
+      <div class="card" id="mainSpeechCard">
+        <div class="row" style="justify-content:space-between">
+          <div class="title" id="modeLabel">Substantive Speech</div>
+          <div class="muted" id="meta"></div>
+        </div>
+        <div class="clock" id="clock">3:00</div>
+        <div class="progress" id="progress">
+          <div class="fill" id="fill"></div>
+          <div class="seg" id="segA"></div>
+          <div class="seg" id="segB"></div>
+          <div class="seg" id="segC"></div>
+        </div>
+        <div class="caps">
+          <div id="capA">0 → 1st: -</div>
+          <div id="capB">1st → 2nd: -</div>
+          <div id="capC">2nd → Final: -</div>
+        </div>
+        <div class="row" style="justify-content:center;margin-top:10px">
+          <button id="startBtn" class="btn">Start</button>
+          <button id="resetBtn" class="btn">Reset</button>
+          <button id="singleBtn" class="btn">Single</button>
+          <button id="doubleBtn" class="btn">Double</button>
+          <button id="stopBellBtn" class="btn" style="display:none">Stop Bell</button>
+          <button id="testContBellBtn" class="btn">Test/Stop Cont.</button>
+        </div>
+        <div class="note" id="statusNote">Status: idle</div>
+      </div>
+
+      <div class="grid grid-3">
+        <!-- Rebuttal Prep Timer -->
+        <div class="card" id="rebuttalPrepCard">
+          <div class="title">Rebuttal Prep</div>
+          <input id="rprepInput" class="input" value="1:00" />
+          <div class="clock" id="rprepClock">1:00</div>
+          <div class="bar"><div class="bfill" id="rprepFill" style="width:0%"></div></div>
+          <div class="row" style="justify-content:center;margin-top:8px">
+            <button id="rprepStart" class="btn">Start</button>
+            <button id="rprepReset" class="btn">Reset</button>
+          </div>
+        </div>
+        
+        <!-- Reply Timer Card -->
+        <div class="card" id="replySpeechCard">
+          <div class="title">Reply (3:00)</div>
+          <input id="replyInput" class="input" value="3:00" />
+          <div class="clock" id="replyClock">3:00</div>
+          <div class="bar"><div class="bfill" id="replyFill" style="width:0%"></div></div>
+          <div class="row" style="justify-content:center;margin-top:8px">
+            <button id="replyStart" class="btn">Start</button>
+            <button id="replyReset" class="btn">Reset</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="title" style="margin-bottom:8px">Settings</div>
+        <div class="grid grid-3">
+          <label class="label">Main (m:ss)
+            <input id="mainInput" class="input" value="3:00" />
+          </label>
+          <label class="label">1st Bell from start (m:ss)
+            <input id="firstInput" class="input" value="1:00" />
+          </label>
+          <label class="label">2nd Bell from start (m:ss)
+            <input id="secondInput" class="input" value="2:00" />
+          </label>
+          <label class="label">Yellow at remaining (m:ss)
+            <input id="yellowInput" class="input" value="1:00" />
+          </label>
+          <label class="label">Red at remaining (m:ss)
+            <input id="redInput" class="input" value="0:30" />
+          </label>
+          <label class="label">Grace Period (m:ss)
+            <input id="graceInput" class="input" value="0:30" />
+          </label>
+          <label class="label">Bell spacing (ms)
+            <input id="spaceInput" class="input" value="100" />
+          </label>
+          <label class="label">Bell mode
+            <select id="modeSel" class="input">
+              <option value="mp3">MP3</option>
+              <option value="synth" selected>Synth</option>
+            </select>
+          </label>
+          <label class="label">Volume (0-1)
+            <input id="volumeInput" type="range" min="0" max="1" step="0.05" value="0.5" />
+          </label>
+          <label class="label">MP3 URL
+            <input id="mp3Url" class="input" placeholder="https://example.com/bell.mp3" />
+          </label>
+          <label class="label">Upload MP3
+            <input id="mp3File" type="file" accept="audio/*" />
+          </label>
+        </div>
+      </div>
+
+      <div class="card" id="tests" style="display:none">
+        <div class="title" style="margin-bottom:6px">Tests</div>
+        <ul class="tests" id="testList"></ul>
+        <div class="note">Note: Blob URLs from uploads are temporary. Use a public URL to persist across refresh.</div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+// ===== iOS AudioContext Fix =====
+document.addEventListener('touchstart', () => {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) {
+      const ctx = new AC();
+      // resume if suspended (iOS requires user gesture)
+      if (ctx.state === 'suspended') ctx.resume().catch(()=>{});
+    }
+  } catch (e) {
+    console.warn('Audio unlock failed', e);
+  }
+}, { once: true });
+
+// Prevent double-tap zoom on some browsers
+document.documentElement.style.touchAction = 'manipulation';
+</script>
+
+<script>
+(function(){
+  // ===== Utilities =====
+  const $ = sel => document.querySelector(sel);
+  const $$ = sel => document.querySelectorAll(sel);
+  const fmt = ms => {
+    const t = Math.max(0, Math.ceil(ms/1000));
+    const m = Math.floor(t/60);
+    const s = t%60;
+    return `${m}:${String(s).padStart(2,'0')}`;
+  };
+  const allDigits = t => !!t && /^[0-9]+$/.test(t);
+  const parseMin = input => {
+    const t = (input||'').trim();
+    if (allDigits(t)) return parseInt(t,10)*60000;
+    const p = t.split(':');
+    const m = +p[0] || 0, s = +p[1] || 0;
+    return (m*60 + s) * 1000;
+  };
+
+  // ===== Speaker Data =====
+  const createSpeakerOrder = () => [
+    { role: "Prep", initials: "PREP", team: "None", timers: ["prep"], active: true },
+    { role: "Prime Minister", initials: "PM", team: "Prop", timers: ["main"], active: true },
+    { role: "LO Prep", initials: "R", team: "Opp", timers: ["rebuttal"], active: true },
+    { role: "Leader of Opp", initials: "LO", team: "Opp", timers: ["main"], active: true },
+    { role: "DPM Prep", initials: "R", team: "Prop", timers: ["rebuttal"], active: true },
+    { role: "Deputy PM", initials: "DPM", team: "Prop", timers: ["main"], active: true },
+    { role: "DLO Prep", initials: "R", team: "Opp", timers: ["rebuttal"], active: true },
+    { role: "Deputy LO", initials: "DLO", team: "Opp", timers: ["main"], active: true },
+    { role: "PW Prep", initials: "R", team: "Prop", timers: ["rebuttal"], active: true },
+    { role: "Prop Whip", initials: "PW", team: "Prop", timers: ["main"], active: true },
+    { role: "OW Prep", initials: "R", team: "Opp", timers: ["rebuttal"], active: true },
+    { role: "Opp Whip", initials: "OW", team: "Opp", timers: ["main"], active: true },
+    { role: "Opp Reply", initials: "OR", team: "Opp", timers: ["reply"], active: true },
+    { role: "Prop Reply", initials: "PR", team: "Prop", timers: ["reply"], active: true },
+  ];
+  
+  let speakerOrder = createSpeakerOrder();
+  let activeSpeakerIndex = 0;
+  let draggingIndex = null;
+
+  // ===== State =====
+  const state = {
+    preset:'Substantive',
+    main: 3*60000,
+    first: 60000,
+    second: 2*60000,
+    yellow: 60000,
+    red: 30000,
+    grace: 30000,
+    spacing: 100,
+    running:false,
+    muted:false,
+    mode:'synth',
+    mp3Url:null,
+    volume: 0.5,
+  };
+
+  let timerSnapshot = {};
+
+  // Load persisted settings
+  try{
+    state.mode = localStorage.getItem('bellMode') || state.mode;
+    state.mp3Url = localStorage.getItem('mp3Url') || state.mp3Url;
+    state.spacing = parseInt(localStorage.getItem('spacingMs') || state.spacing, 10);
+    state.volume = parseFloat(localStorage.getItem('volume') || state.volume);
+  }catch{}
+
+  // Elements
+  const wrap = $('#app');
+  const clockEl = $('#clock');
+  const metaEl = $('#meta');
+  const progressEl = $('#progress');
+  const fillEl = $('#fill');
+  const segA = $('#segA'), segB=$('#segB'), segC=$('#segC');
+  const capA=$('#capA'), capB=$('#capB'), capC=$('#capC');
+  const statusNote=$('#statusNote');
+  const modeLabel=$('#modeLabel');
+
+  // Inputs
+  const mainInput=$('#mainInput'), firstInput=$('#firstInput'), secondInput=$('#secondInput');
+  const yellowInput=$('#yellowInput'), redInput=$('#redInput'), graceInput=$('#graceInput');
+  const spaceInput=$('#spaceInput');
+  const modeSel=$('#modeSel'), mp3Url=$('#mp3Url'), mp3File=$('#mp3File'), volumeInput=$('#volumeInput');
+
+  const muteBtn=$('#muteBtn'), enableBtn=$('#enableBtn'), testsBtn=$('#testsBtn');
+  const startBtn=$('#startBtn'), resetBtn=$('#resetBtn');
+  const singleBtn=$('#singleBtn'), doubleBtn=$('#doubleBtn');
+  const stopBellBtn=$('#stopBellBtn'), testContBellBtn=$('#testContBellBtn');
+
+  // Quick timers
+  const prepInput=$('#prepInput'), prepClock=$('#prepClock'), prepFill=$('#prepFill');
+  const rprepInput=$('#rprepInput'), rprepClock=$('#rprepClock'), rprepFill=$('#rprepFill');
+  const replyInput=$('#replyInput'), replyClock=$('#replyClock'), replyFill=$('#replyFill');
+  const prepStart=$('#prepStart'), prepReset=$('#prepReset');
+  const rprepStart=$('#rprepStart'), rprepReset=$('#rprepReset');
+  const replyStart=$('#replyStart'), replyReset=$('#replyReset');
+
+  // Timer Containers
+  const prepTimerContainer = $('#prepTimerContainer');
+  const mainSpeechCard = $('#mainSpeechCard');
+  const rebuttalPrepCard = $('#rebuttalPrepCard');
+  const replySpeechCard = $('#replySpeechCard');
+
+  // Presets UI (kept minimal)
+  const presetsRow = $('#presets');
+
+  // Speaker Progress UI
+  const speakerProgress = $('#speakerProgress');
+  const nextSpeakerBtn = $('#nextSpeakerBtn');
+  const prevSpeakerBtn = $('#prevSpeakerBtn');
+  const resetOrderBtn = $('#resetOrderBtn');
+
+  function initSpeakerProgress() {
+    speakerProgress.innerHTML = '';
+    speakerOrder.forEach((speaker, index) => {
+      const box = document.createElement('div');
+      box.className = `speaker-box team-${(speaker.team||'none').toLowerCase()}`;
+      box.classList.toggle('inactive', !speaker.active);
+      const initials = speaker.initials;
+      box.textContent = initials;
+      box.title = speaker.role + " (Click to select, Double-click to toggle, Drag to reorder)";
+      box.dataset.index = index;
+      box.addEventListener('click', () => {
+        if (!speaker.active) return;
+        setActiveSpeaker(index);
+      });
+      box.addEventListener('dblclick', () => {
+        speaker.active = !speaker.active;
+        box.classList.toggle('inactive', !speaker.active);
+      });
+      // Drag and Drop
+      box.draggable = true;
+      box.addEventListener('dragstart', (e) => {
+        draggingIndex = index;
+        e.dataTransfer.effectAllowed = 'move';
+        box.classList.add('dragging');
+      });
+      box.addEventListener('dragend', () => {
+        box.classList.remove('dragging');
+        draggingIndex = null;
+      });
+      box.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        box.classList.add('drag-over');
+      });
+      box.addEventListener('dragleave', () => {
+        box.classList.remove('drag-over');
+      });
+      box.addEventListener('drop', (e) => {
+        e.preventDefault();
+        box.classList.remove('drag-over');
+        if (draggingIndex === null || draggingIndex === index) return;
+        const [draggedItem] = speakerOrder.splice(draggingIndex, 1);
+        speakerOrder.splice(index, 0, draggedItem);
+        if (activeSpeakerIndex === draggingIndex) {
+          activeSpeakerIndex = index;
+        } else if (draggingIndex < activeSpeakerIndex && index >= activeSpeakerIndex) {
+          activeSpeakerIndex--;
+        } else if (draggingIndex > activeSpeakerIndex && index <= activeSpeakerIndex) {
+          activeSpeakerIndex++;
+        }
+        initSpeakerProgress();
+        setActiveSpeaker(activeSpeakerIndex, true);
+      });
+      speakerProgress.appendChild(box);
+    });
+  }
+
+  function setActiveSpeaker(index, force = false) {
+    if (!force && index === activeSpeakerIndex) return;
+    activeSpeakerIndex = index;
+    $$('.speaker-box').forEach(box => box.classList.remove('active-speaker'));
+    const activeBox = $(`[data-index="${index}"]`);
+    if (activeBox) activeBox.classList.add('active-speaker');
+    const speaker = speakerOrder[index];
+    if (!speaker) return;
+    const timers = speaker.timers || [];
+    prepTimerContainer.style.display = timers.includes('prep') ? 'flex' : 'none';
+    mainSpeechCard.style.display = timers.includes('main') ? 'block' : 'none';
+    rebuttalPrepCard.style.display = timers.includes('rebuttal') ? 'block' : 'none';
+    replySpeechCard.style.display = timers.includes('reply') ? 'block' : 'none';
+    if (timers.includes('main')) applyPreset('Substantive');
+    else if (timers.includes('reply')) applyPreset('Reply');
+  }
+
+  function findNextSpeaker(direction) {
+    let newIndex = activeSpeakerIndex;
+    for (let i = 1; i <= speakerOrder.length; i++) {
+      newIndex = (newIndex + direction + speakerOrder.length) % speakerOrder.length;
+      if (speakerOrder[newIndex].active) return newIndex;
+    }
+    return activeSpeakerIndex;
+  }
+
+  nextSpeakerBtn.onclick = () => setActiveSpeaker(findNextSpeaker(1));
+  prevSpeakerBtn.onclick = () => setActiveSpeaker(findNextSpeaker(-1));
+  resetOrderBtn.onclick = () => { speakerOrder = createSpeakerOrder(); initSpeakerProgress(); setActiveSpeaker(0); };
+
+  // ===== Audio =====
+  const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=';
+  let audioCtx = null;
+  let unlocked = false;
+  let mp3AudioElement = null; // base element for mp3 playback fallback
+  const getOrCreateContext = async ()=> {
+    if (state.muted) { setStatus('muted'); return null; }
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) { setStatus('no-audiocontext'); return null; }
+    if (!audioCtx) {
+      try { audioCtx = new Ctx(); } catch (e) { setStatus('no-audiocontext'); return null; }
+    }
+    if (audioCtx.state === 'suspended') {
+      try { await audioCtx.resume(); } catch (e) {}
+    }
+    return audioCtx;
+  };
+
+  const playSilent = async ()=> {
+    try {
+      const a = new Audio(SILENT_WAV);
+      a.muted = true;
+      await a.play().catch(()=>{});
+      a.pause();
+      a.currentTime = 0;
+      return true;
+    } catch (e) { return false; }
+  };
+
+  const setStatus = (s)=> { statusNote.textContent = 'Status: ' + s + (state.mode==='mp3' && !state.mp3Url ? ' · Tip: set a public MP3 URL or upload below' : ''); };
+
+  const unlock = async ()=> {
+    const ctx = await getOrCreateContext();
+    const tagOk = await playSilent();
+    const ctxOk = !!ctx && ctx.state === 'running';
+    if (ctxOk || tagOk) { unlocked = true; setStatus(state.mode==='mp3' && !state.mp3Url ? 'armed' : 'ready'); return true; }
+    setStatus('blocked');
+    return false;
+  };
+
+  // Helper to create a fresh Audio for playback (cloned so repeated play works on iOS)
+  function createPlayableAudio(url) {
+    try {
+      if (!url) return null;
+      // Use HTMLAudioElement
+      const base = new Audio(url);
+      base.preload = 'auto';
+      return base;
+    } catch {
+      return null;
+    }
+  }
+
+  const playBell = async (count) => {
+    if (state.muted) return;
+    const ok = await unlock(); if (!ok) return;
+    if (state.mode === 'synth') {
+      const ctx = audioCtx;
+      if (!ctx) return;
+      const baseTime = ctx.currentTime + 0.05;
+      const freqs = [659.26, 783.99, 987.77, 1174.66];
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0.0001, baseTime);
+      master.gain.exponentialRampToValueAtTime(Math.max(0.001, state.volume), baseTime + 0.02);
+      master.gain.exponentialRampToValueAtTime(0.0001, baseTime + 2.5);
+      master.connect(ctx.destination);
+      for (let i = 0; i < count; i++) {
+        const time = baseTime + (i * state.spacing) / 1000;
+        freqs.forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const g = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, time);
+          const partialGain = Math.max(0.001, state.volume * (1 - (idx * 0.15)));
+          const decay = 2.0 - (idx * 0.3);
+          g.gain.setValueAtTime(partialGain, time);
+          g.gain.exponentialRampToValueAtTime(0.0001, time + decay);
+          osc.connect(g).connect(master);
+          osc.start(time);
+          osc.stop(time + 2.5);
+        });
+      }
+    } else {
+      // MP3 mode: create fresh audio instances for each ring
+      if (!state.mp3Url) return;
+      for (let i = 0; i < count; i++) {
+        setTimeout(() => {
+          try {
+            // clone via new Audio()
+            const a = createPlayableAudio(state.mp3Url);
+            if (a) {
+              a.volume = state.volume;
+              a.play().catch(()=>{});
+            }
+          } catch {}
+        }, i * state.spacing);
+      }
+    }
+  };
+
+  // Controls
+  muteBtn.onclick = ()=>{ state.muted = !state.muted; muteBtn.textContent = state.muted ? 'Muted' : 'Sound'; };
+  enableBtn.onclick = unlock;
+  testsBtn.onclick = ()=>{ const box=$('#tests'); box.style.display = box.style.display === 'none' ? 'block' : 'none'; };
+
+  // ===== Main Timer Engine =====
+  let startTs = null, acc = 0, raf = null, remaining = state.main;
+  let inGrace = false, graceRemaining = 0;
+  let contBellInterval = null;
+  const fired = { first:false, second:false, final:false };
+
+  const stopContinuousBell = ()=> {
+    if (contBellInterval) { clearInterval(contBellInterval); contBellInterval = null; }
+    stopBellBtn.style.display = 'none';
+    testContBellBtn.textContent = 'Test/Stop Cont.';
+  };
+
+  stopBellBtn.onclick = stopContinuousBell;
+  testContBellBtn.onclick = ()=>{
+    if (contBellInterval) {
+      stopContinuousBell();
+    } else {
+      unlock();
+      contBellInterval = setInterval(()=>playBell(1), 500);
+      testContBellBtn.textContent = 'Stop';
+    }
+  };
+
+  const loop = (ts) => {
+    if (startTs === null) startTs = ts;
+    const elapsed = (ts - startTs) + acc;
+    if (inGrace) {
+      graceRemaining = Math.max(0, timerSnapshot.grace - elapsed);
+      remaining = 0;
+      if (graceRemaining === 0) {
+        if (!contBellInterval && timerSnapshot.preset === 'Substantive') {
+          contBellInterval = setInterval(()=>playBell(1), 500);
+          stopBellBtn.style.display = 'inline-flex';
+        }
+      }
+    } else {
+      remaining = Math.max(0, timerSnapshot.main - elapsed);
+      if (remaining === 0 && !inGrace) {
+        if (!fired.final) {
+          playBell(2);
+          fired.final = true;
+        }
+        inGrace = true;
+        acc = 0;
+        startTs = ts;
+        graceRemaining = timerSnapshot.grace;
+      }
+    }
+    render();
+    if (!inGrace) checkBells();
+    if (remaining > 0 || graceRemaining > 0) {
+      raf = requestAnimationFrame(loop);
+    } else {
+      if (raf) cancelAnimationFrame(raf);
+      raf = null;
+    }
+  };
+
+  const snapshotSettings = () => {
+    timerSnapshot = {
+      main: state.main,
+      first: state.first,
+      second: state.second,
+      yellow: state.yellow,
+      red: state.red,
+      grace: state.grace,
+      preset: state.preset,
+    };
+  };
+
+  const start = ()=>{
+    if (raf) return;
+    if (acc === 0) {
+      snapshotSettings();
+      inGrace = false;
+      graceRemaining = timerSnapshot.grace;
+    }
+    requestAnimationFrame(loop);
+  };
+  const pause = ()=>{
+    if (!raf) return;
+    cancelAnimationFrame(raf);
+    raf = null;
+    const now = performance.now();
+    acc += (now - startTs);
+    startTs = null;
+    stopContinuousBell();
+  };
+  const reset = ()=>{
+    if (raf) cancelAnimationFrame(raf);
+    raf = null;
+    startTs = null;
+    acc = 0;
+    inGrace = false;
+    remaining = timerSnapshot.main || state.main;
+    graceRemaining = timerSnapshot.grace || state.grace;
+    fired.first = fired.second = fired.final = false;
+    stopContinuousBell();
+    render(true);
+  };
+
+  startBtn.onclick = async () => {
+  await unlockAudio(); // ensures sound unlocked before timer starts
+  await unlock();
+  if (raf) {
+    pause();
+    startBtn.textContent = 'Start';
+  } else {
+    start();
+    startBtn.textContent = 'Pause';
+  }
+};
+  resetBtn.onclick = ()=>{ pause(); reset(); startBtn.textContent='Start'; };
+  singleBtn.onclick = ()=>{ unlock(); playBell(1); };
+  doubleBtn.onclick = ()=>{ unlock(); playBell(2); };
+
+  // Inputs handlers
+  const syncFromInputs = ()=>{
+    state.main = parseMin(mainInput.value);
+    state.first = parseMin(firstInput.value);
+    state.second = parseMin(secondInput.value);
+    state.yellow = parseMin(yellowInput.value);
+    state.red = parseMin(redInput.value);
+    state.grace = parseMin(graceInput.value);
+    state.spacing = Math.max(100, parseInt(spaceInput.value||'100',10)||100);
+    state.mode = modeSel.value;
+    state.volume = parseFloat(volumeInput.value);
+    if (mp3Url.value) state.mp3Url = mp3Url.value;
+    localStorage.setItem('bellMode', state.mode);
+    if (state.mp3Url) localStorage.setItem('mp3Url', state.mp3Url);
+    localStorage.setItem('spacingMs', String(state.spacing));
+    localStorage.setItem('volume', String(state.volume));
+    if (!raf) reset();
+    modeLabel.textContent = state.preset === 'Substantive' ? 'Substantive Speech' : 'Reply Speech';
+  };
+
+  mainInput.value = fmt(state.main);
+  firstInput.value = fmt(state.first);
+  secondInput.value = fmt(state.second);
+  yellowInput.value = fmt(state.yellow);
+  redInput.value = fmt(state.red);
+  graceInput.value = fmt(state.grace);
+  spaceInput.value = state.spacing;
+  modeSel.value = state.mode;
+  volumeInput.value = state.volume;
+  if (state.mp3Url) mp3Url.value = state.mp3Url;
+
+  [mainInput,firstInput,secondInput,yellowInput,redInput,graceInput,spaceInput,modeSel,mp3Url,volumeInput].forEach(el=> el.addEventListener('change', syncFromInputs));
+  mp3File.addEventListener('change', (e)=>{ const f=e.target.files && e.target.files[0]; if(f){ const url = URL.createObjectURL(f); state.mp3Url = url; mp3Url.value = url; } });
+
+  // Presets
+  function applyPreset(key){
+    state.preset = key;
+    if (key === 'Substantive'){
+      mainInput.value='3:00'; firstInput.value='1:00'; secondInput.value='2:00';
+      yellowInput.value='1:00'; redInput.value='0:30'; graceInput.value='0:30';
+    } else {
+      mainInput.value='3:00'; firstInput.value='0:00'; secondInput.value='0:00';
+      yellowInput.value='0:30'; redInput.value='0:15'; graceInput.value='0:00';
+    }
+    syncFromInputs();
+  }
+
+  // Quick timers helper
+  function miniTimer(inputEl, clockEl, fillEl, endBellCount = 0){
+    let dur = parseMin(inputEl.value);
+    let snapshotDur = dur;
+    let rem = dur;
+    let st = null, acc = 0, r = null;
+    const paint = ()=>{ clockEl.textContent = fmt(rem); const pct = snapshotDur === 0 ? 0 : 100 - Math.round((rem/snapshotDur)*100); fillEl.style.width = Math.max(0,Math.min(100,pct))+"%"; };
+    const lp = (ts)=>{ if (st===null) st=ts; const el=(ts-st)+acc; rem = Math.max(0, snapshotDur - el); paint(); if (rem>0) r=requestAnimationFrame(lp); else { if (r) cancelAnimationFrame(r); r=null; if (endBellCount>0) playBell(endBellCount); } };
+    const start = ()=>{ if (r) return; if (acc === 0) snapshotDur = parseMin(inputEl.value); rem = snapshotDur - acc; requestAnimationFrame(lp); };
+    const pause = ()=>{ if(!r) return; cancelAnimationFrame(r); r=null; const now=performance.now(); acc += (now - st); st=null; };
+    const reset = ()=>{ if(r) cancelAnimationFrame(r); r=null; st=null; acc=0; dur = parseMin(inputEl.value); snapshotDur = dur; rem = dur; paint(); };
+    inputEl.addEventListener('change', ()=>{ dur = parseMin(inputEl.value); if (!r) reset(); });
+    paint();
+    return { start, pause, reset };
+  }
+
+  const prep = miniTimer(prepInput, prepClock, prepFill, 1);
+  const rprep = miniTimer(rprepInput, rprepClock, rprepFill, 1);
+  const reply = miniTimer(replyInput, replyClock, replyFill, 2);
+
+  prepStart.onclick = ()=>{ if (prepStart.textContent === 'Start') { prep.start(); prepStart.textContent='Pause'; } else { prep.pause(); prepStart.textContent='Start'; } };
+  prepReset.onclick = ()=>{ prep.reset(); prepStart.textContent='Start'; };
+  rprepStart.onclick = ()=>{ if (rprepStart.textContent === 'Start') { rprep.start(); rprepStart.textContent='Pause'; } else { rprep.pause(); rprepStart.textContent='Start'; } };
+  rprepReset.onclick = ()=>{ rprep.reset(); rprepStart.textContent='Start'; };
+  replyStart.onclick = ()=>{ if (replyStart.textContent === 'Start') { reply.start(); replyStart.textContent='Pause'; } else { reply.pause(); replyStart.textContent='Start'; } };
+  replyReset.onclick = ()=>{ reply.reset(); replyStart.textContent='Start'; };
+
+  // Render main
+  function render(forceState = false){
+    const source = (raf && !forceState) ? timerSnapshot : state;
+    const total = source.main;
+    const currentRemaining = inGrace ? graceRemaining : remaining;
+    clockEl.textContent = inGrace ? '-' + fmt(graceRemaining) : fmt(currentRemaining);
+    const bg = currentRemaining <= source.red ? 'var(--bg-red)' : currentRemaining <= source.yellow ? 'var(--bg-yellow)' : 'var(--bg-green)';
+    const fg = currentRemaining <= source.red ? 'var(--fg-red)' : currentRemaining <= source.yellow ? 'var(--fg-yellow)' : 'var(--fg-green)';
+    const bd = currentRemaining <= source.red ? 'var(--bd-red)' : currentRemaining <= source.yellow ? 'var(--bd-yellow)' : 'var(--bd-green)';
+    if (inGrace) {
+      const flash = Math.floor(performance.now() / 500) % 2 === 0;
+      wrap.style.background = flash ? 'var(--bg-red)' : 'var(--bg-card)';
+      wrap.style.color = flash ? 'var(--fg-red)' : 'var(--fg)';
+      document.documentElement.style.setProperty('--bd', flash ? 'var(--bd-red)' : 'var(--bd-green)');
+    } else {
+      wrap.style.background = bg;
+      wrap.style.color = fg;
+      document.documentElement.style.setProperty('--bd', bd);
+    }
+    const a = Math.min(source.first || 0, total);
+    const b = Math.min(Math.max(0, (source.second || 0) - (source.first || 0)), total);
+    const c = Math.max(0, total - (a + b));
+    const pct = n => total === 0 ? 0 : (n/total)*100;
+    const fillPct = total === 0 ? 100 : pct(total - remaining);
+    fillEl.style.width = fillPct + "%";
+    segA.style.width = pct(a) + "%"; segB.style.width = pct(b) + "%"; segC.style.width = pct(c) + "%";
+    capA.textContent = `0 → 1st: ${source.first?fmt(source.first):'-'}`;
+    capB.textContent = `1st → 2nd: ${(source.first && source.second) ? fmt(source.second - source.first) : '-'}`;
+    capC.textContent = `2nd → Final: ${source.second ? fmt(total - source.second) : fmt(total - (source.first || 0))}`;
+    metaEl.textContent = `Main: ${fmt(total)}${source.first ? ` · 1st ${fmt(source.first)}` : ''}${source.second ? ` · 2nd ${fmt(source.second)}` : ''}`;
+    if (inGrace) metaEl.textContent = `GRACE PERIOD: ${fmt(source.grace)}`;
+  }
+
+  // Fire bells as elapsed passes markers
+  function checkBells(){
+    const elapsed = timerSnapshot.main - remaining;
+    if (!fired.first && timerSnapshot.first > 0 && elapsed >= timerSnapshot.first) { playBell(1); fired.first = true; }
+    if (!fired.second && timerSnapshot.second > 0 && elapsed >= timerSnapshot.second) { playBell(1); fired.second = true; }
+  }
+
+  // Initial paint & init
+  snapshotSettings();
+  render(true);
+  initSpeakerProgress();
+  setActiveSpeaker(0);
+
+  // ===== Tests =====
+  const tests = [
+    {name:'formatTime 61000 -> 1:01', run:()=> fmt(61000)==='1:01'},
+    {name:'parse m:ss 2:30 -> 150000', run:()=> parseMin('2:30')===150000},
+    {name:'parse m only 3 -> 180000', run:()=> parseMin('3')===180000},
+    {name:'threshold order yellow>red', run:()=> 60000>30000},
+    {name:'spacing clamp', run:()=> Math.max(100,parseInt('60',10)||100)===100},
+    {name:'parse 0:05 -> 5000', run:()=> parseMin('0:05')===5000},
+    {name:'parse 0 -> 0', run:()=> parseMin('0')===0},
+    {name:'AudioContext guard (presence boolean)', run:()=> typeof (window.AudioContext||window.webkitAudioContext)!=='undefined' || true },
+  ];
+  const testList = $('#testList');
+  const showTests = ()=>{ testList.innerHTML=''; tests.forEach(t=>{ const li=document.createElement('li'); let ok=false; try{ ok=t.run(); }catch{ ok=false } li.textContent=(ok?'PASS ':'FAIL ')+t.name; li.style.color=ok?'#065f46':'#7f1d1d'; testList.appendChild(li); }); };
+  testsBtn.addEventListener('click', showTests);
+
+})();
+</script>
+
+<script>
+  // ===== Wake Lock / Keep Screen On (iOS fallback) =====
+  let wakeLock = null;
+  async function keepAwake() {
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+      } else {
+        // iOS fallback: small visual refresh to keep Safari awake
+        if (!window._debateTimerKeepAwakeInterval) {
+          window._debateTimerKeepAwakeInterval = setInterval(() => {
+            // tiny movement to keep screen alive
+            window.scrollBy(0, 1);
+            window.scrollBy(0, -1);
+          }, 60000);
+        }
+      }
+    } catch (err) {
+      console.log('Wake lock error:', err);
+    }
+  }
+  document.addEventListener('visibilitychange', async () => {
+    if (wakeLock !== null && document.visibilityState === 'visible') {
+      await keepAwake();
+    }
+  });
+  keepAwake();
+</script>
+
+<script>
+// ===== iOS Audio Unlock =====
+function unlockAudio() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  try {
+    const ctx = new AC();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start(0);
+    oscillator.stop(0.01);
+    ctx.resume();
+  } catch (err) {
+    console.warn('Audio unlock error:', err);
+  }
+  document.removeEventListener('touchstart', unlockAudio);
+}
+
+document.addEventListener('touchstart', unlockAudio, { once: true });
+</script>
+</body>
+</html>
